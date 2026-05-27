@@ -674,6 +674,7 @@ class ChatStrategyBase(ABC):
                 ("connector_id", "=", connector.id),
             ],
             fields=["id", "website", "name"],
+            fields_nested={"stage_id": ["id", "fold"]},
             sort="id",
             order="DESC",
             limit=1,
@@ -687,6 +688,15 @@ class ChatStrategyBase(ABC):
             and item_url
             and existing_lead.website
             and existing_lead.website != item_url
+        ):
+            existing_lead = None
+
+        # Если лид в закрытой стадии (fold=True: Выиграно, Проиграно, Спам)
+        # — повторное обращение, создаём новый лид.
+        if (
+            existing_lead
+            and existing_lead.stage_id
+            and existing_lead.stage_id.fold
         ):
             existing_lead = None
 
