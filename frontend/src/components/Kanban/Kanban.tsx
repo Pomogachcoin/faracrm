@@ -14,6 +14,7 @@ import {
   useSensor,
   useSensors,
   closestCenter,
+  useDroppable,
 } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -135,6 +136,8 @@ interface KanbanColumnProps {
 
 // Колонка канбана (для группированного вида)
 function KanbanColumn({ stage, records, model, fields, onCardClick }: KanbanColumnProps) {
+  const { setNodeRef, isOver } = useDroppable({ id: `stage-${stage.id}` });
+
   return (
     <div className={classes.column}>
       <div
@@ -155,7 +158,17 @@ function KanbanColumn({ stage, records, model, fields, onCardClick }: KanbanColu
           items={records.map(r => r.id)}
           strategy={verticalListSortingStrategy}
         >
-          <Stack gap="xs" p="xs">
+          <Stack
+            ref={setNodeRef}
+            gap="xs"
+            p="xs"
+            style={{
+              minHeight: 60,
+              backgroundColor: isOver ? 'var(--mantine-color-blue-0)' : undefined,
+              borderRadius: 4,
+              transition: 'background-color 0.15s',
+            }}
+          >
             {records.map(record => (
               <SortableKanbanCard
                 key={record.id}
@@ -246,17 +259,19 @@ export function Kanban<T extends FaraRecord>({
     const activeRecord = recordsData?.data.find(r => r.id === active.id);
     if (!activeRecord) return;
 
-    // Найти новую колонку
-    const overRecord = recordsData?.data.find(r => r.id === over.id);
     let newStageId: number | undefined;
 
-    if (overRecord) {
-      // Перетащили на другую карточку - берём её stage
-      const stageValue = overRecord[groupByField];
-      newStageId = typeof stageValue === 'object' ? stageValue?.id : stageValue;
+    const overId = String(over.id);
+    if (overId.startsWith('stage-')) {
+      // Перетащили на droppable-зону колонки (пустую или заголовок)
+      newStageId = parseInt(overId.replace('stage-', ''), 10);
     } else {
-      // Перетащили на пустую колонку
-      newStageId = over.id as number;
+      // Перетащили на другую карточку — берём её stage
+      const overRecord = recordsData?.data.find(r => r.id === over.id);
+      if (overRecord) {
+        const stageValue = overRecord[groupByField];
+        newStageId = typeof stageValue === 'object' ? stageValue?.id : stageValue;
+      }
     }
 
     const currentStageValue = activeRecord[groupByField];

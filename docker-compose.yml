@@ -111,16 +111,16 @@ services:
       # AUTH__COOKIE_SAMESITE: lax
 
       # Cron settings
-      # CRON__ENABLED: "true"
-      # CRON__CHECK_INTERVAL: 60
-      # CRON__MAX_THREADS: 2
+      CRON__ENABLED: "true"
+      CRON__CHECK_INTERVAL: 60
+      CRON__MAX_THREADS: 2
 
       # Work with external api, Telegram, Whatsapp, Google etc...
       # SITE_URL: "https://mydomain.com"
       # API_URL: "https://mydomain.com/api"
 
-      # SITE_URL: "http://127.0.0.1:7777"
-      # API_URL: "http://127.0.0.1:7777/api"
+      SITE_URL: "https://crm.crimpalsert.ru"
+      API_URL: "https://crm.crimpalsert.ru/api"
     ports:
       - "8000:8000"
     volumes:
@@ -137,7 +137,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "7777:80"
+      - "8080:80"
     security_opt:
       - no-new-privileges:true
 

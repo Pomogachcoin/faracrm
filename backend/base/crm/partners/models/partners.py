@@ -86,6 +86,15 @@ class Partner(AuditMixin, PolymorphicParentMixin):
     # )
     notes: str | None = Text(string="Notes")
     website: str | None = Char(string="Website URL")
+    type: str = Selection(
+        options=[
+            ("lead", "Лид"),
+            ("client", "Клиент"),
+            ("partner", "Партнёр / Исполнитель"),
+        ],
+        default="lead",
+        string="Тип",
+    )
 
     # Контакты (телефоны, email, telegram и т.д.)
     # Внешние аккаунты доступны через contact_ids.external_account_ids

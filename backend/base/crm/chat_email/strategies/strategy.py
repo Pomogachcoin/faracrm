@@ -441,45 +441,49 @@ class EmailStrategy(ChatStrategyBase):
                         fetch_response.result != "OK"
                         or not fetch_response.lines
                     ):
+                        logger.warning(
+                            "IMAP fetch failed: seq=%s, result=%r, lines=%r",
+                            seq,
+                            fetch_response.result,
+                            fetch_response.lines[:3] if fetch_response.lines else [],
+                        )
                         continue
 
                     # Парсим UID и тело из ответа
-                    # Формат: [b'123 FETCH (UID 456 BODY[] {size}', <bytearray>, b')', b'Success']
+                    # aioimaplib возвращает тело письма как bytearray,
+                    # метаданные (включая UID) — как bytes или str
                     uid_int = None
                     raw_email = None
 
                     for line in fetch_response.lines:
-                        if isinstance(line, (bytearray, bytes)):
-                            if isinstance(line, bytearray) or (
-                                isinstance(line, bytes) and len(line) > 200
-                            ):
-                                # Это тело письма
-                                raw_email = (
-                                    bytes(line)
-                                    if isinstance(line, bytearray)
-                                    else line
-                                )
-                            elif isinstance(line, bytes):
-                                # Может быть строка с UID
-                                decoded = line.decode(errors="ignore")
-                                if "UID" in decoded:
-                                    match = re.search(r"UID\s+(\d+)", decoded)
-                                    if match:
-                                        uid_int = int(match.group(1))
-                        elif isinstance(line, str) and "UID" in line:
-                            match = re.search(r"UID\s+(\d+)", line)
-                            if match:
-                                uid_int = int(match.group(1))
+                        if isinstance(line, bytearray):
+                            # aioimaplib всегда возвращает тело как bytearray
+                            raw_email = bytes(line)
+                        elif isinstance(line, (bytes, str)):
+                            decoded = (
+                                line.decode(errors="ignore")
+                                if isinstance(line, bytes)
+                                else line
+                            )
+                            if "UID" in decoded:
+                                match = re.search(r"UID\s+(\d+)", decoded)
+                                if match:
+                                    uid_int = int(match.group(1))
+                            # Fallback: большой bytes-блок может быть телом
+                            elif isinstance(line, bytes) and len(line) > 500 and raw_email is None:
+                                raw_email = line
 
-                    logger.debug(
-                        "Parsed: uid=%s, has_body=%s",
+                    logger.warning(
+                        "IMAP fetch parsed: seq=%s, uid=%s, has_body=%s, last_uid=%s",
+                        seq,
                         uid_int,
                         raw_email is not None,
+                        last_uid,
                     )
 
                     if not uid_int or uid_int <= last_uid:
-                        logger.debug(
-                            "Skipping seq=%s, uid=%s, last_uid=%s",
+                        logger.warning(
+                            "Skipping seq=%s: uid=%s, last_uid=%s — uid not parsed or already seen",
                             seq,
                             uid_int,
                             last_uid,
@@ -532,6 +536,61 @@ class EmailStrategy(ChatStrategyBase):
         """Создать адаптер для email сообщения."""
         return EmailMessageAdapter(connector, raw_message)
 
+    async def _fetch_item_info(self, connector, adapter):
+        """Тема письма как заголовок — становится именем лида."""
+        subject = getattr(adapter, "subject", None) or ""
+        return subject, ""
+
+    async def _get_or_create_lead(self, env, connector, adapter, contact, external_chat):
+        """Переопределяем чтобы добавить email отправителя и тему в заметки."""
+        lead = await super()._get_or_create_lead(
+            env, connector, adapter, contact, external_chat
+        )
+        if lead and adapter.author_id:
+            sender_email = adapter.author_id
+            subject = getattr(adapter, "subject", None) or ""
+            current_notes = lead.notes or ""
+            if sender_email not in current_notes:
+                prefix = f"От: {sender_email}"
+                if subject:
+                    prefix += f"\nТема: {subject}"
+                new_notes = f"{prefix}\n{current_notes}".strip()
+                try:
+                    await lead.update(type(lead)(notes=new_notes))
+                except Exception as exc:
+                    logger.warning("Could not update lead notes: %s", exc)
+
+        # Новый контакт написал → делаем партнёра клиентом
+        # (не трогаем тех, кто уже является партнёром-исполнителем)
+        if lead and contact:
+            try:
+                partner_ref = contact.partner_id
+                if partner_ref:
+                    partner_id_val = (
+                        partner_ref.id
+                        if hasattr(partner_ref, "id") and partner_ref.id
+                        else partner_ref
+                    )
+                    if partner_id_val:
+                        partners = await env.models.partner.search(
+                            filter=[("id", "=", partner_id_val)],
+                            fields=["id", "type"],
+                            limit=1,
+                        )
+                        if partners and partners[0].type != "partner":
+                            await partners[0].update(
+                                env.models.partner(type="client")
+                            )
+                            logger.info(
+                                "Partner %s set to 'client' (incoming email, lead=%s)",
+                                partner_id_val,
+                                lead.id,
+                            )
+            except Exception as exc:
+                logger.warning("Could not set partner as client: %s", exc)
+
+        return lead
+
     async def handle_inbound_webhook(
         self,
         connector: "ChatConnector",
@@ -577,6 +636,13 @@ class EmailStrategy(ChatStrategyBase):
                 "email_username",
                 "email_password",
                 "imap_last_uid",
+                "contact_type_id",
+                "lead_generation",
+                "lead_distribution",
+                "lead_type",
+                "lead_stage_id",
+                "outbox_account_id",
+                "notify",
             ],
         )
 
