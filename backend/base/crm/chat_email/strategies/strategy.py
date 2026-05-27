@@ -636,7 +636,6 @@ class EmailStrategy(ChatStrategyBase):
                 "email_username",
                 "email_password",
                 "imap_last_uid",
-                "contact_type_id",
                 "lead_generation",
                 "lead_distribution",
                 "lead_type",
@@ -644,6 +643,7 @@ class EmailStrategy(ChatStrategyBase):
                 "outbox_account_id",
                 "notify",
             ],
+            fields_nested={"contact_type_id": ["id", "name"]},
         )
 
         if not connectors:
